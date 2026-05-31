@@ -7,8 +7,7 @@
 >
 > **The artifact is a better-configured team, not an answer.**
 
-Built for a Multi-Agent Orchestration hackathon, targeting **Most Sophisticated Harness** and
-**Best Use of Weave**.
+Built for a Multi-Agent Orchestration hackathon
 
 ---
 

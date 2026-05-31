@@ -1,0 +1,210 @@
+[
+  {
+    "id": "S01",
+    "question": "Which team owns edge-gateway?",
+    "answer": "Edge Platform",
+    "hop_type": "single",
+    "gold_docs": ["svc-api-gateway.md"],
+    "reasoning": "Owner team is recorded only in the service doc (Edge Platform)."
+  },
+  {
+    "id": "S02",
+    "question": "What is booking-svc's inbound request timeout?",
+    "answer": "900 ms",
+    "hop_type": "single",
+    "gold_docs": ["svc-booking.md"],
+    "reasoning": "Booking-svc declares its own inbound request timeout (900 ms)."
+  },
+  {
+    "id": "S03",
+    "question": "What is dispatch-svc's inbound request timeout?",
+    "answer": "600 ms",
+    "hop_type": "single",
+    "gold_docs": ["svc-dispatch.md"],
+    "reasoning": "Dispatch-svc declares its own inbound request timeout (600 ms)."
+  },
+  {
+    "id": "S04",
+    "question": "What is driver-location-svc's inbound request timeout?",
+    "answer": "300 ms",
+    "hop_type": "single",
+    "gold_docs": ["svc-driver-location.md"],
+    "reasoning": "Driver-location-svc declares its own inbound request timeout (300 ms)."
+  },
+  {
+    "id": "S05",
+    "question": "What is payments-svc's inbound request timeout?",
+    "answer": "2000 ms",
+    "hop_type": "single",
+    "gold_docs": ["svc-payments.md"],
+    "reasoning": "Payments-svc declares its own inbound request timeout (2000 ms)."
+  },
+  {
+    "id": "S06",
+    "question": "Which team owns notification-svc?",
+    "answer": "Engagement",
+    "hop_type": "single",
+    "gold_docs": ["svc-notification.md"],
+    "reasoning": "Owner team is recorded only in the service doc (Engagement)."
+  },
+  {
+    "id": "S07",
+    "question": "Which two services does pricing-svc call downstream, and with what per-call timeouts?",
+    "answer": "surge-engine (200 ms) and geo-svc (250 ms)",
+    "hop_type": "single",
+    "gold_docs": ["svc-pricing.md"],
+    "reasoning": "Pricing-svc's downstream-dependency list names surge-engine (200 ms) and geo-svc (250 ms)."
+  },
+  {
+    "id": "S08",
+    "question": "What is the connection-pool maximum for DS-GEO-3?",
+    "answer": "40 concurrent connections per service instance",
+    "hop_type": "single",
+    "gold_docs": ["catalog-datastores.md"],
+    "reasoning": "Deep datastore config (the 40-connection pool ceiling) lives only in the datastore catalog."
+  },
+  {
+    "id": "S09",
+    "question": "What database engine and connection-pool maximum does DS-PAY-LEDGER use?",
+    "answer": "PostgreSQL 15, connection pool max 60",
+    "hop_type": "single",
+    "gold_docs": ["catalog-datastores.md"],
+    "reasoning": "DS-PAY-LEDGER engine and pool max (PostgreSQL 15, 60) are in the datastore catalog."
+  },
+  {
+    "id": "S10",
+    "question": "What is NorthPay's Meridian-configured call timeout?",
+    "answer": "2500 ms",
+    "hop_type": "single",
+    "gold_docs": ["catalog-third-party.md"],
+    "reasoning": "The third-party catalog records NorthPay's Meridian-configured call timeout (2500 ms)."
+  },
+  {
+    "id": "S11",
+    "question": "When PulseSMS's rate limit is exceeded, what does it return and what happens to the excess messages?",
+    "answer": "Returns HTTP 429; excess messages are dropped, not queued",
+    "hop_type": "single",
+    "gold_docs": ["catalog-third-party.md"],
+    "reasoning": "PulseSMS failure behavior (429, messages dropped not queued) is in the third-party catalog."
+  },
+  {
+    "id": "S12",
+    "question": "Under the platform retry policy, which requests are eligible for automatic retries, and how many?",
+    "answer": "Only idempotent GETs, up to 2 retries with exponential backoff (50 ms base); writes (POST/PUT) are never auto-retried",
+    "hop_type": "single",
+    "gold_docs": ["conventions-timeouts-retries.md"],
+    "reasoning": "The platform-wide retry rule (2 retries, idempotent GETs only) is in the conventions doc."
+  },
+  {
+    "id": "M01",
+    "question": "During surge, the mobile app shows HTTP 504 errors when riders try to book a trip. Walk the request path from the gateway and name the underlying resource limit that is the root cause.",
+    "answer": "DS-GEO-3's 40-connection-per-instance pool ceiling. Under surge its p99 read latency jumps past 600 ms, which cascades up driver-location-svc -> dispatch-svc -> booking-svc -> edge-gateway and surfaces to the client as a 504.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-api-gateway.md", "svc-booking.md", "svc-dispatch.md", "svc-driver-location.md", "catalog-datastores.md"],
+    "reasoning": "504 symptom (gateway) is traced down the booking dependency edges to driver-location, then jumps to the datastore catalog where the DS-GEO-3 pool ceiling lives."
+  },
+  {
+    "id": "M02",
+    "question": "driver-location-svc's p99 latency cliffs during surge. Which specific datastore configuration limit explains the cliff, and what is its value?",
+    "answer": "DS-GEO-3's connection-pool maximum of 40 concurrent connections per service instance; beyond it, excess reads queue and p99 jumps from ~35 ms to 600+ ms.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-driver-location.md", "catalog-datastores.md"],
+    "reasoning": "The service doc references DS-GEO-3 by ID; the pool ceiling and latency cliff are only in the datastore catalog."
+  },
+  {
+    "id": "M03",
+    "question": "A 504 on bookings is cascading from a single datastore's saturation. Which service instance directly owns the connections to that datastore, and which team owns that service?",
+    "answer": "driver-location-svc owns the DS-GEO-3 connections, and it is owned by the Geo & Mapping team.",
+    "hop_type": "multi",
+    "gold_docs": ["catalog-datastores.md", "svc-driver-location.md"],
+    "reasoning": "The catalog says DS-GEO-3 backs driver-location-svc; the owner team is recorded only in that service doc."
+  },
+  {
+    "id": "M04",
+    "question": "Payments intermittently time out and leave transactions in an ambiguous state during peak hours. Comparing the service's own 2000 ms inbound deadline against the call timeout it has configured for its payment provider, what is the misconfiguration?",
+    "answer": "The NorthPay call timeout (2500 ms) is configured higher than payments-svc's own 2000 ms inbound budget, so a charge can still be in flight when the inbound deadline abandons the request, leaving an ambiguous transaction. Fix: set the NorthPay timeout below 2000 ms.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-payments.md", "catalog-third-party.md"],
+    "reasoning": "The 2000 ms inbound budget is in the payments doc and the 2500 ms NorthPay timeout is in the third-party catalog; the bug emerges only from the pair."
+  },
+  {
+    "id": "M05",
+    "question": "Given payments-svc's retry policy and the NorthPay timeout misalignment, why don't these mid-flight charges get automatically corrected?",
+    "answer": "Charges are non-idempotent and are never auto-retried (platform writes are never retried), so a charge cut off mid-flight by the 2000 ms deadline while NorthPay (2500 ms timeout) is still processing is left to a sweeper/reconciliation job rather than retried.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-payments.md", "catalog-third-party.md", "conventions-timeouts-retries.md"],
+    "reasoning": "Payments doc: charges not retried (sweeper); conventions: writes never auto-retried; third-party: NorthPay 2500 ms timeout drives the cutoff."
+  },
+  {
+    "id": "M06",
+    "question": "Auditing dispatch-svc against the platform timeout convention, is its inbound timeout correctly sized relative to its downstream calls? Show the arithmetic.",
+    "answer": "No, it violates the convention: dispatch-svc's downstream calls are driver-location-svc (350 ms) + matching-engine (300 ms) = 650 ms, which exceeds its 600 ms inbound timeout, so it can abandon a request before its downstream calls finish.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-dispatch.md", "conventions-timeouts-retries.md"],
+    "reasoning": "Per-call timeouts (350+300) are in the dispatch doc; the 'inbound > sum of downstream' rule is in conventions; the violation is emergent."
+  },
+  {
+    "id": "M07",
+    "question": "During a large promotional blast, some riders never receive their ride alerts. Which external limit causes this, and what happens to the excess messages?",
+    "answer": "PulseSMS's 100 messages/second rate limit; above it PulseSMS returns 429 and the excess messages are dropped rather than queued, so those riders get no alert.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-notification.md", "catalog-third-party.md"],
+    "reasoning": "The notification doc names the blast/drop symptom and PulseSMS; the 100 msg/s rate limit and drop-not-queue behavior are in the third-party catalog."
+  },
+  {
+    "id": "M08",
+    "question": "A 504 is observed at edge-gateway. According to the platform's cascade model, is the gateway itself likely the root cause, and which downstream service on the booking critical path should be investigated first?",
+    "answer": "No, the gateway is almost never the root cause (a 504 means a service below it breached the 1000 ms budget); investigate dispatch-svc first, since booking-svc blocks on it to assign a driver.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-api-gateway.md", "conventions-timeouts-retries.md", "svc-booking.md"],
+    "reasoning": "Gateway doc: 504 and 'never the root cause'; conventions: cascade rule; booking doc: a new booking blocks on dispatch-svc."
+  },
+  {
+    "id": "M09",
+    "question": "driver-location-svc has a 300 ms inbound timeout. Under what datastore condition will it start breaching that timeout, and how much does its backing store's latency change?",
+    "answer": "When DS-GEO-3's 40-connection pool saturates under surge: nominal p99 read latency of ~35 ms climbs to 600+ ms, far over the 300 ms inbound budget, so driver-location-svc starts timing out.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-driver-location.md", "catalog-datastores.md"],
+    "reasoning": "The 300 ms inbound budget is in the service doc; the 35 ms nominal vs 600+ ms saturated latency and the pool trigger are in the datastore catalog."
+  },
+  {
+    "id": "M10",
+    "question": "payments-svc depends on both an internal datastore and an external provider. Which of the two is implicated in the peak-hour timeout problem, and why isn't the other one?",
+    "answer": "NorthPay is implicated: its 2500 ms call timeout exceeds payments-svc's 2000 ms inbound budget, causing mid-flight cutoffs. DS-PAY-LEDGER is not implicated (PostgreSQL 15, ~25 ms p99 write, negligible against the 2000 ms budget).",
+    "hop_type": "multi",
+    "gold_docs": ["svc-payments.md", "catalog-third-party.md", "catalog-datastores.md"],
+    "reasoning": "Payments doc lists both dependencies; the third-party catalog gives the culprit NorthPay 2500 ms timeout; the datastore catalog shows DS-PAY-LEDGER is fast (the red herring)."
+  },
+  {
+    "id": "M11",
+    "question": "The datastore catalog flags one store as 'the most common origin of cascading timeouts on the dispatch path.' Which store is it, and trace how its failure surfaces to an external client.",
+    "answer": "DS-GEO-3. When its 40-connection pool saturates, driver-location-svc latency cliffs to 600+ ms, breaching dispatch-svc's 600 ms inbound budget, which stalls booking-svc, which breaches edge-gateway's 1000 ms budget, surfacing to the client as an HTTP 504.",
+    "hop_type": "multi",
+    "gold_docs": ["catalog-datastores.md", "svc-driver-location.md", "svc-dispatch.md", "svc-booking.md", "svc-api-gateway.md"],
+    "reasoning": "The catalog names DS-GEO-3 and the 'dispatch path' hint; the chain is traversed upward through driver-location -> dispatch -> booking -> gateway to the 504 (Chain A in reverse)."
+  },
+  {
+    "id": "M12",
+    "question": "Does pricing-svc's inbound timeout satisfy the platform convention relative to its downstream calls? Show the numbers.",
+    "answer": "Yes: pricing-svc's downstream calls are surge-engine (200 ms) + geo-svc (250 ms) = 450 ms, under its 500 ms inbound timeout, so it satisfies the convention with a 50 ms margin.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-pricing.md", "conventions-timeouts-retries.md"],
+    "reasoning": "Per-call timeouts (200+250) are in the pricing doc and the rule is in conventions; here the check passes, a negative control against pattern-matching 'violation'."
+  },
+  {
+    "id": "M14",
+    "question": "Riders occasionally see the fare they were quoted differ from the amount they are finally charged. Following this symptom to the data store at the root of the problem, what is that store's configured time-to-live?",
+    "answer": "30 seconds - the TTL on DS-SURGE-CACHE, which backs surge-engine; a stale value from there is what makes a quoted fare drift from the charged amount.",
+    "hop_type": "multi",
+    "gold_docs": ["svc-pricing.md", "catalog-datastores.md"],
+    "reasoning": "Pricing doc's failure mode: quoted fares drift when surge-engine returns a stale multiplier; the datastore catalog shows DS-SURGE-CACHE backs surge-engine with a 30 s TTL. Stem omits 'surge/cache/TTL' so retrieval must traverse from the pricing symptom rather than lexically hit the catalog."
+  },
+  {
+    "id": "M16",
+    "question": "pricing-svc allows 200 ms for the dependency that supplies its price adjustments. During a bulk failure of that dependency's fast lookup path, it falls back to deriving each value inline instead of serving precomputed ones. How much latency does that fallback add per request?",
+    "answer": "~180 ms per request (surge-engine deriving values inline on a DS-SURGE-CACHE miss storm).",
+    "hop_type": "multi",
+    "gold_docs": ["svc-pricing.md", "catalog-datastores.md"],
+    "reasoning": "Pricing doc: 200 ms budget for surge-engine (its price-adjustment dependency); the datastore catalog (DS-SURGE-CACHE, which backs surge-engine) notes a miss storm forces a synchronous recompute adding ~180 ms/request (still under the 200 ms budget). Stem paraphrases to avoid 'surge/cache/recompute/synchronous'."
+  }
+]

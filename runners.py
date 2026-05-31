@@ -20,11 +20,8 @@ drops the low-overlap second hop on multi-hop questions.
 
 Config and Rollout live here (the leaf module) so optimizer.py can import them
 without a circular dependency.
-
-Smoke test (needs OPENROUTER_API_KEY in ./env):  .venv/bin/python runners.py
 """
 from __future__ import annotations
-
 import json
 import operator
 import os
@@ -35,27 +32,51 @@ from typing import Annotated, Callable, Optional, TypedDict
 from langgraph.graph import END, START, StateGraph
 from rank_bm25 import BM25Okapi
 
-# --- optional Weave tracing: no-op decorator when weave is absent/uninitialised ---
 try:
     import weave
     op = weave.op
-except Exception:  # pragma: no cover
+except Exception:  
     def op(fn=None, **_):
         return fn if fn else (lambda f: f)
 
 DOCS_DIR = os.environ.get("DOCS_DIR", "documents")
-DEFAULT_MODEL = os.environ.get("RUNNER_MODEL", "openai/gpt-4o-mini")
 GATE_TERM_CAP = 5  # max dependency IDs the completeness gate will chase per call
 
 
-# ===================== LLM (OpenRouter) =====================
+# ===================== env files (.env / env) =====================
+def _load_env_files() -> None:
+    """Load ./.env then ./env into os.environ (no override). Tolerates 'KEY = value'
+    spacing and surrounding quotes, so a hand-edited .env just works."""
+    for path in (".env", "env"):
+        if not os.path.exists(path):
+            continue
+        for k, v in re.findall(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", open(path).read(), re.M):
+            os.environ.setdefault(k, v.strip().strip('"').strip("'"))
+
+
+_load_env_files()
+
+# ===================== LLM (W&B Inference, OpenRouter fallback) =====================
+# W&B Inference (keyed on WANDB_API_KEY) is primary; OpenRouter is the fallback. W&B
+# Inference serves OPEN models only, so the defaults are *instruct* (non-reasoning) models:
+# a reasoning model burns the judge's tiny max_tokens budget on hidden reasoning and returns
+# an empty answer, which would zero out correctness. Override with RUNNER_MODEL / JUDGE_MODEL.
+_USE_WANDB = bool(os.environ.get("WANDB_API_KEY"))
+WANDB_INFERENCE_BASE = "https://api.inference.wandb.ai/v1"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+DEFAULT_MODEL = os.environ.get(
+    "RUNNER_MODEL", "meta-llama/Llama-3.3-70B-Instruct" if _USE_WANDB else "openai/gpt-4o-mini")
+
+# The W&B entity/project, provided in .env as PROJECT. The team key both runs W&B Inference
+# attributed here AND logs Weave traces + the leaderboard here -> one source of truth.
+WANDB_PROJECT = (os.environ.get("WEAVE_PROJECT") or os.environ.get("WANDB_PROJECT")
+                 or os.environ.get("PROJECT"))
+
+
 def _load_key() -> str:
-    k = os.environ.get("OPENROUTER_API_KEY")
-    if not k and os.path.exists("env"):
-        kv = dict(re.findall(r"^([A-Z_]+)=(.*)$", open("env").read(), re.M))
-        k = kv.get("OPENROUTER_API_KEY", "").strip()
+    k = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not k:
-        raise RuntimeError("OPENROUTER_API_KEY not set and not found in ./env")
+        raise RuntimeError("OPENROUTER_API_KEY not set and not found in ./.env or ./env")
     return k
 
 
@@ -66,7 +87,12 @@ def _client_singleton():
     global _client
     if _client is None:
         from openai import OpenAI
-        _client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=_load_key())
+        if _USE_WANDB:                       # W&B Inference is OpenAI-compatible
+            _client = OpenAI(base_url=WANDB_INFERENCE_BASE,
+                             api_key=os.environ["WANDB_API_KEY"].strip(),
+                             project=WANDB_PROJECT)
+        else:
+            _client = OpenAI(base_url=OPENROUTER_BASE, api_key=_load_key())
     return _client
 
 

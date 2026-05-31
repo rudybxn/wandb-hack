@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass
 
 from runners import RUNNERS, Config, Corpus, llm
@@ -35,7 +36,11 @@ except Exception:  # pragma: no cover
     def op(fn=None, **_):
         return fn if fn else (lambda f: f)
 
-JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "openai/gpt-4o")  # gpt-4o-mini under-credits correct prose
+# The judge runs at max_tokens=3, so it MUST be a non-reasoning instruct model (a reasoning
+# model would spend the budget on hidden reasoning and emit no YES/NO). Default tracks the
+# provider chosen in runners.py (_load_env_files has already populated os.environ on import).
+JUDGE_MODEL = os.environ.get(
+    "JUDGE_MODEL", "meta-llama/Llama-3.3-70B-Instruct" if os.environ.get("WANDB_API_KEY") else "openai/gpt-4o")
 
 JUDGE_SYS = (
     "You grade whether a CANDIDATE answer matches the REFERENCE answer to a question. "
@@ -161,20 +166,35 @@ def run_generation(config: Config, bank: list, corpus: Corpus | None = None,
     If weave_project is given (and W&B is logged in), also log one Evaluation = one
     leaderboard row, reusing the already-computed rollouts (no extra team calls)."""
     corpus = corpus or Corpus()
+    logging = bool(weave_project) and Evaluation is not None
+    if logging:
+        weave.init(weave_project)               # init BEFORE the team runs so gen-0 agent traces log too
+
     runner = RUNNERS[config.topology](config, corpus)
-    rollouts = {row["id"]: runner(row["question"]).to_dict() for row in bank}
+    # tag every team trace with the generation + lever state so the per-question drill-down
+    # (gen N wrong -> gen N+1 right) is findable in Weave.
+    tag = weave.attributes({"gen": gen, "topology": config.topology, "k": config.retrieval_k,
+                            "max_subquestions": config.max_subquestions,
+                            "gate": config.completeness_gate, "dedup": config.dedup_retrieval}) \
+        if logging else nullcontext()
+    with tag:
+        rollouts = {row["id"]: runner(row["question"]).to_dict() for row in bank}
 
     profile = _profile(config, bank, rollouts, judge=judge)
 
-    if weave_project and Evaluation is not None:
-        weave.init(weave_project)
-
+    if logging:
         @op
         def predict(id: str) -> dict:           # cached: Evaluation does not re-run the team
             return rollouts[id]
 
-        name = f"gen{gen}-{config.topology}-k{config.retrieval_k}"
-        evaluation = Evaluation(name=name, dataset=bank, scorers=SCORERS)
+        # name encodes the FULL lever state so the leaderboard reads as a change-log:
+        # gen2-supervisor_workers-k3-sub3+gate, gen3-debate_verify-k3-sub3+gate, ...
+        flags = "".join(f"+{n}" for n, on in (("gate", config.completeness_gate),
+                                              ("dedup", config.dedup_retrieval)) if on)
+        name = f"gen{gen}-{config.topology}-k{config.retrieval_k}-sub{config.max_subquestions}{flags}"
+        # name -> the Evaluation OBJECT; evaluation_name -> the trace/call DISPLAY name (else
+        # Weave auto-labels the run "eval-<date>-<random-words>"). Set both so they match.
+        evaluation = Evaluation(name=name, evaluation_name=name, dataset=bank, scorers=SCORERS)
         asyncio.run(evaluation.evaluate(predict))  # judge memoised -> cheap
 
     return profile

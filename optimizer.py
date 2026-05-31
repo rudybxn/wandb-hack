@@ -19,7 +19,6 @@ repair - not in inventing topologies.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, replace
 
 from runners import RUNNERS, Config, Corpus, DEFAULT_MODEL, _parse_json, llm
@@ -188,6 +187,34 @@ def _valid_lever(knob: str, value, cfg: Config) -> bool:
     return False
 
 
+def _report_trajectory(traj: list, path: str = "trajectory.json") -> None:
+    """Write per-question results per generation to `path` and print a 'flip table'
+    -- which questions go wrong -> right across generations. This is the 'each question gets
+    better' view; the leaderboard is the 'each batch of 26 gets better' view."""
+    json.dump(traj, open(path, "w"), indent=2)
+    if not traj:
+        return
+    gens = [t["gen"] for t in traj]
+    correct = {r["id"]: {} for r in traj[0]["rows"]}
+    hop = {}
+    for t in traj:
+        for r in t["rows"]:
+            correct[r["id"]][t["gen"]] = int(r["correct"])
+            hop[r["id"]] = r["hop"]
+    print(f"\nPer-question correctness across generations {gens}  (wrote {path})")
+    fixed = []
+    for rid in correct:
+        seq = [correct[rid].get(g, 0) for g in gens]
+        if max(seq) > seq[0]:
+            fixed.append(rid)
+            flag = "  <- fixed"
+        else:
+            flag = "" if seq[0] == 1 else "  (still wrong)"
+        print(f"  {rid:5s} [{hop[rid]:6s}]  {' '.join(map(str, seq))}{flag}")
+    print(f"\nFIXED by the harness (wrong at gen0 -> right later): "
+          f"{', '.join(fixed) if fixed else '(none)'}")
+
+
 # --------------------------------------------------------------------------- #
 # The closed loop. Step budget + monotonic-progress guard + repeat-config guard.
 # Progress = improvement in correctness OR in multi-hop complete-chain (so a lever
@@ -195,7 +222,8 @@ def _valid_lever(knob: str, value, cfg: Config) -> bool:
 # The artifact is the best-by-correctness config.
 # --------------------------------------------------------------------------- #
 def run_harness(bank: list, budget: int = 6, optimizer=None, weave_project: str | None = None,
-                model: str | None = None, baseline: Config | None = None):
+                model: str | None = None, baseline: Config | None = None,
+                traj_path: str = "trajectory.json"):
     optimizer = optimizer or RuleBasedOptimizer()
     corpus = Corpus()
     cfg = baseline or Config(topology="single_agent", retrieval_k=3, max_subquestions=3)
@@ -204,12 +232,13 @@ def run_harness(bank: list, budget: int = 6, optimizer=None, weave_project: str 
 
     best, best_score, best_chain = None, -1.0, -1.0
     seen = {_sig(cfg)}
-    history = []
+    history, traj = [], []
 
     for gen in range(budget):
         profile = run_generation(cfg, bank, corpus=corpus, weave_project=weave_project, gen=gen)
         fp = FailureProfile.from_profile(profile)
         history.append((gen, _sig(cfg), fp))
+        traj.append({"gen": gen, "config": _sig_dict(cfg), "rows": profile["rows"]})
         print(f"gen {gen} [{cfg.topology} k={cfg.retrieval_k} subq={cfg.max_subquestions} "
               f"dedup={cfg.dedup_retrieval} gate={cfg.completeness_gate}]  "
               f"correct={fp.correctness:.2f} multi_recall={fp.multi_recall:.2f} "
@@ -237,11 +266,13 @@ def run_harness(bank: list, budget: int = 6, optimizer=None, weave_project: str 
         seen.add(_sig(nxt))
         cfg = nxt
 
+    _report_trajectory(traj, traj_path)
     print(f"\nBEST: [{best.topology} k={best.retrieval_k} subq={best.max_subquestions} "
           f"dedup={best.dedup_retrieval} gate={best.completeness_gate}]  correctness={best_score:.2f}")
     return best, history
 
 
 if __name__ == "__main__":
+    from runners import WANDB_PROJECT          # provided in .env (PROJECT), resolved on import
     bank = json.load(open("qa_bank.json"))
-    run_harness(bank, budget=6, weave_project=os.environ.get("WEAVE_PROJECT"))
+    run_harness(bank, budget=6, weave_project=WANDB_PROJECT)

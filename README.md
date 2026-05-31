@@ -138,7 +138,7 @@ jupyter nbconvert --to notebook --execute --inplace analysis.ipynb
 
 ---
 
-## Weave is the spine, not a bolt-on
+## Weave is the spine
 
 - **Tracing:** every agent step and LLM call is a `@weave.op`, traced regardless of provider.
 - **Scoring:** the outcome + coordination scorers are Weave `Scorer`s.
@@ -158,25 +158,8 @@ optimizer.py          # Config menu, rule-based + LLM optimizer, run_harness (th
 scorers.py            # outcome + coordination scorers, run_generation (1 Evaluation / gen)
 runners.py            # 3 LangGraph topologies + BM25 Corpus; returns Rollouts; env loading
 qa_bank.json          # 26 Q&A rows (12 single + 14 multi), each with gold_docs
-documents/            # the synthetic "Meridian" corpus (11 docs, 2 planted multi-hop chains)
-run_single_hop.py     # adaptivity experiment: harness on the single-hop slice only
-build_notebook.py     # generates analysis.ipynb from the trajectory_*.json files
-analysis.ipynb        # 5 figures: leaderboard climb, coordination, accuracy-vs-cost, flips, adaptivity
-trajectory*.json      # per-question × per-generation results (full + single-hop runs)
-CLAUDE.md             # design notes / contributor guide
+documents/            # the synthetic "Meridian" corpus 
 ```
-
----
-
-## Why this isn't "just RAG"
-
-All three topologies *are* RAG (retrieve whole docs → stuff context → generate) — that's the
-point. Single-shot RAG is the **floor that loses**: the corpus is engineered so the root cause
-is referenced only by a dependency ID with low lexical overlap, so widening `k` adds distractors,
-not the missing hop. What recovers it is **coordination** — decomposition, the evidence-conditioned
-completeness gate, and debate/verify. The contribution is the **self-improvement loop** above the
-team: diagnose → one attributable lever → re-run, with guards. The RAG team is the *subject* the
-harness hardens; swap the task and the harness still applies.
 
 ---
 
@@ -187,12 +170,4 @@ harness hardens; swap the task and the harness still applies.
   no-ops and the loop stalls.
 - **Topology is a discrete menu, not arbitrary graphs** — the optimizer selects + tunes.
 - **Keep the loop guards** — monotonic-progress + repeat-config halts are cheap loop-control.
-- **Deterministic by default** — temp 0, rule-based optimizer; reproducible for a rehearsed demo.
-
-## Limitations / honest notes
-
-- Retrieval is BM25 over whole files; stronger retrieval would lift the gen-0 baseline. The
-  claim is *"coordination recovers what retrieval drops on multi-hop,"* not *"our retrieval is best."*
-- Correctness plateaus around **0.92 (24/26)**; the last questions sit at the judge's borderline,
-  and run-to-run nondeterminism can flip the *winning* config between two configs that tie on
-  accuracy (e.g. `supervisor+gate` vs `debate_verify`). For a demo, present off one logged run.
+- **Deterministic by default** — temp 0, rule-based optimizer;

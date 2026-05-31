@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover
     def op(fn=None, **_):
         return fn if fn else (lambda f: f)
 
-JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "openai/gpt-4o")  # gpt-4o-mini under-credits correct prose
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "openai/gpt-oss-120b")
 
 JUDGE_SYS = (
     "You grade whether a CANDIDATE answer matches the REFERENCE answer to a question. "

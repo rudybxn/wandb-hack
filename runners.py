@@ -44,19 +44,44 @@ except Exception:  # pragma: no cover
         return fn if fn else (lambda f: f)
 
 DOCS_DIR = os.environ.get("DOCS_DIR", "documents")
-DEFAULT_MODEL = os.environ.get("RUNNER_MODEL", "openai/gpt-4o-mini")
 GATE_TERM_CAP = 5  # max dependency IDs the completeness gate will chase per call
 
+# LLM provider selection: set WANDB_API_KEY to use W&B Inference; otherwise OpenRouter.
+_WANDB_BASE_URL = "https://api.inference.wandb.ai/v1"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_USE_WANDB = bool(os.environ.get("WANDB_API_KEY"))
 
-# ===================== LLM (OpenRouter) =====================
-def _load_key() -> str:
-    k = os.environ.get("OPENROUTER_API_KEY")
-    if not k and os.path.exists("env"):
-        kv = dict(re.findall(r"^([A-Z_]+)=(.*)$", open("env").read(), re.M))
-        k = kv.get("OPENROUTER_API_KEY", "").strip()
-    if not k:
-        raise RuntimeError("OPENROUTER_API_KEY not set and not found in ./env")
-    return k
+# Default model differs per provider. Override with RUNNER_MODEL.
+_DEFAULT_MODEL_WANDB = "meta-llama/Llama-3.3-70B-Instruct"
+_DEFAULT_MODEL_OPENROUTER = "openai/gpt-4o-mini"
+DEFAULT_MODEL = os.environ.get(
+    "RUNNER_MODEL",
+    _DEFAULT_MODEL_WANDB if _USE_WANDB else _DEFAULT_MODEL_OPENROUTER,
+)
+
+
+# ===================== LLM client =====================
+def _load_env_file() -> dict:
+    if os.path.exists(".env"):
+        return dict(re.findall(r"^([A-Z_]+)=(.*)$", open(".env").read(), re.M))
+    if os.path.exists("env"):
+        return dict(re.findall(r"^([A-Z_]+)=(.*)$", open("env").read(), re.M))
+    return {}
+
+
+def _load_key() -> tuple[str, str]:
+    """Return (api_key, base_url) for the active provider."""
+    env = _load_env_file()
+    wandb_key = os.environ.get("WANDB_API_KEY") or env.get("WANDB_API_KEY", "").strip()
+    if wandb_key:
+        return wandb_key, _WANDB_BASE_URL
+    or_key = os.environ.get("OPENROUTER_API_KEY") or env.get("OPENROUTER_API_KEY", "").strip()
+    if or_key:
+        return or_key, _OPENROUTER_BASE_URL
+    raise RuntimeError(
+        "No API key found. Set WANDB_API_KEY (W&B Inference) or "
+        "OPENROUTER_API_KEY (OpenRouter) in environment or .env file."
+    )
 
 
 _client = None
@@ -66,7 +91,8 @@ def _client_singleton():
     global _client
     if _client is None:
         from openai import OpenAI
-        _client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=_load_key())
+        api_key, base_url = _load_key()
+        _client = OpenAI(base_url=base_url, api_key=api_key)
     return _client
 
 
